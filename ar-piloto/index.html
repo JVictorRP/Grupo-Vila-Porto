@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#2a0f17">
-<title>Ficha em Realidade Aumentada · Piloto</title>
+<title>Kaiken · Ficha em realidade aumentada</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -30,7 +30,7 @@
   #intro{background:radial-gradient(120% 80% at 50% 0%, var(--vinho2) 0%, var(--vinho) 60%, #160609 100%)}
   .selo{font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:var(--ouro)}
   .produtor{margin-top:auto;font-size:13px;letter-spacing:.32em;text-transform:uppercase;opacity:.8}
-  h1{font-family:var(--serif);font-weight:500;font-size:64px;line-height:.95;margin:6px 0 10px}
+  h1{font-family:var(--serif);font-weight:500;font-size:52px;line-height:.95;margin:6px 0 10px}
   .sub{font-size:15px;opacity:.82;line-height:1.45}
   .passos{margin:28px 0 22px;display:grid;gap:12px}
   .passo{display:flex;gap:12px;align-items:flex-start;font-size:14px;line-height:1.45;opacity:.92}
@@ -98,30 +98,36 @@
   .curio{font-family:var(--serif);font-style:italic;font-size:19px;line-height:1.4;color:var(--vinho)}
   .folha .btn.prim{background:var(--vinho);color:var(--creme);margin-top:22px}
   .erro{background:#5a1a1a;color:#fff;padding:12px 14px;border-radius:12px;font-size:13px;margin-top:14px;display:none;text-align:left}
+  .lista{display:grid;gap:10px;margin:22px 0 20px}
+  .item{display:flex;align-items:center;gap:12px;padding:14px;border-radius:16px;background:rgba(244,236,224,.06);border:1px solid rgba(244,236,224,.12)}
+  .item .nome{font-family:var(--serif);font-size:26px;line-height:1}
+  .item .uva{font-size:12.5px;opacity:.75;margin-top:3px}
+  .item .chip{margin-left:auto;font-size:11.5px;font-weight:600;border-radius:999px;padding:8px 12px;border:1px solid rgba(201,164,106,.6);color:var(--ouro);background:none;cursor:pointer;white-space:nowrap}
+  .item .chip.ok{background:rgba(127,209,139,.14);border-color:rgba(127,209,139,.5);color:#a8e3b1}
+  .btn:disabled{opacity:.4}
 </style>
 </head>
 <body>
 
-<!-- 1. Intro -->
+
+<!-- 1. Intro: um QR para todos os rótulos -->
 <section id="intro" class="tela ativa">
   <div class="selo">Ficha técnica em realidade aumentada · Piloto</div>
-  <div class="produtor" id="iProdutor">Kaiken</div>
-  <h1 id="iNome">Mai</h1>
-  <p class="sub" id="iSub">Malbec · Vistalba, Mendoza</p>
-  <div class="passos" id="iPassos"></div>
+  <div class="produtor">Kaiken</div>
+  <h1>Aponte para<br>qualquer rótulo</h1>
+  <p class="sub">Um único QR. A câmera reconhece a garrafa e mostra a ficha certa.</p>
+  <div class="lista" id="lista"></div>
+  <p class="sub" id="dica" style="font-size:12.5px;opacity:.65;margin-bottom:14px"></p>
   <div class="acoes">
-    <button class="btn prim" id="btnIniciar">Apontar para o rótulo</button>
-    <button class="btn sec" id="btnFichaDireta">Ver ficha sem câmera</button>
-    <button class="btn sec" id="btnComprarIntro">Comprar este vinho</button>
-    <button class="link" id="btnRecalibrar" style="display:none">Refazer foto do rótulo</button>
+    <button class="btn prim" id="btnIniciar">Abrir câmera</button>
     <div class="erro" id="erroIntro"></div>
   </div>
 </section>
 
 <!-- 2. Calibração (só no piloto: em loja os rótulos já vêm cadastrados) -->
 <section id="calib" class="tela">
-  <h2>Ensine o rótulo</h2>
-  <p>Só no primeiro uso. Fotografe o rótulo de frente, com boa luz e sem reflexo, preenchendo a moldura.</p>
+  <h2 id="calibTitulo">Ensine o rótulo</h2>
+  <p>Fotografe o rótulo de frente, com boa luz e sem reflexo, preenchendo a moldura.</p>
   <div class="moldura" id="moldura"><span>Rótulo aqui</span></div>
   <div class="barra" id="barra"><i></i></div>
   <div id="calibStatus"></div>
@@ -191,75 +197,71 @@ const CHECKOUT = {
   divina: ""   // ex.: https://sualoja.com.br/kaiken-divina-chardonnay
 };
 
-const params = new URLSearchParams(location.search);
-const chave = (params.get("vinho") || location.hash.slice(1) || "mai").toLowerCase();
-const V = VINHOS[chave] || VINHOS.mai;
-const KEY = "ar-alvo-" + (VINHOS[chave] ? chave : "mai");
+const ORDEM = Object.keys(VINHOS);
 const $ = s => document.querySelector(s);
 const mostrar = id => document.querySelectorAll(".tela").forEach(t => t.classList.toggle("ativa", t.id === id));
 const log = (...a) => console.log("[AR]", ...a);
+let atual = null;          // vinho reconhecido agora (ou escolhido)
+let editando = null;       // vinho sendo fotografado
 
-/* ---------- Intro ---------- */
-$("#iProdutor").textContent = V.produtor;
-$("#iNome").textContent = V.nome;
-$("#iSub").textContent = V.sub;
-document.title = `${V.produtor} ${V.nome} · Ficha em AR`;
+/* ---------- Armazenamento local (IndexedDB): fotos dos rótulos + pacote compilado ---------- */
+function db(){ return new Promise((ok, err) => { const r = indexedDB.open("ar-piloto-multi", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => ok(r.result); r.onerror = () => err(r.error); }); }
+const MEM = {};
+async function put(k, v){ MEM[k] = v; try{ const d = await db(); await new Promise((ok,err)=>{ const t=d.transaction("kv","readwrite"); t.objectStore("kv").put(v, k); t.oncomplete=ok; t.onerror=()=>err(t.error); }); }catch(e){ log("sem IndexedDB", e); } }
+async function get(k){ if (k in MEM) return MEM[k]; try{ const d = await db(); return await new Promise((ok,err)=>{ const r=d.transaction("kv").objectStore("kv").get(k); r.onsuccess=()=>ok(r.result ?? null); r.onerror=()=>err(r.error); }); }catch(e){ return null; } }
 
-/* ---------- Armazenamento local do alvo (IndexedDB) ---------- */
-function db(){ return new Promise((ok, err) => { const r = indexedDB.open("ar-piloto", 1); r.onupgradeneeded = () => r.result.createObjectStore("alvos"); r.onsuccess = () => ok(r.result); r.onerror = () => err(r.error); }); }
-async function salvarAlvo(buf){ try{ const d = await db(); await new Promise((ok,err)=>{ const t=d.transaction("alvos","readwrite"); t.objectStore("alvos").put(buf, KEY); t.oncomplete=ok; t.onerror=()=>err(t.error); }); }catch(e){ log("sem IndexedDB", e); } }
-async function lerAlvo(){ try{ const d = await db(); return await new Promise((ok,err)=>{ const r=d.transaction("alvos").objectStore("alvos").get(KEY); r.onsuccess=()=>ok(r.result||null); r.onerror=()=>err(r.error); }); }catch(e){ return null; } }
-let alvoMem = null;
-
+/* ---------- Intro: lista de rótulos ---------- */
 async function prepararIntro(){
-  const tem = alvoMem || await lerAlvo();
-  const passos = tem
-    ? [["1","Aponte a câmera para o rótulo do " + V.nome + "."],["2","A ficha técnica aparece sobre a garrafa."],["3","Toque em “Ver ficha completa” para os detalhes."]]
-    : [["1","Primeiro uso: tire uma foto do rótulo para o sistema aprender."],["2","Depois, aponte a câmera para a garrafa."],["3","A ficha técnica aparece sobre o rótulo."]];
-  $("#iPassos").innerHTML = passos.map(([n,t]) => `<div class="passo"><b>${n}</b><span>${t}</span></div>`).join("");
-  $("#btnIniciar").textContent = tem ? "Apontar para o rótulo" : "Começar";
-  $("#btnRecalibrar").style.display = tem ? "inline" : "none";
+  const fotos = await Promise.all(ORDEM.map(k => get("foto-" + k)));
+  const n = fotos.filter(Boolean).length;
+  $("#lista").innerHTML = ORDEM.map((k, i) => `
+    <div class="item"><div><div class="nome">${VINHOS[k].nome}</div><div class="uva">${VINHOS[k].sub}</div></div>
+    <button class="chip ${fotos[i] ? "ok" : ""}" data-k="${k}">${fotos[i] ? "✓ Cadastrado" : "Fotografar rótulo"}</button></div>`).join("");
+  document.querySelectorAll(".chip").forEach(b => b.onclick = () => abrirCalib(b.dataset.k));
+  $("#btnIniciar").disabled = n === 0;
+  $("#dica").textContent = n === 0 ? "Piloto: fotografe cada rótulo uma vez para o sistema aprender. Na loja, os rótulos já vêm cadastrados."
+    : n < ORDEM.length ? `${n} de ${ORDEM.length} rótulos cadastrados. Já dá para testar, ou cadastre o outro para ver a troca entre garrafas.`
+    : "Tudo pronto. Na câmera, troque de garrafa e veja a ficha mudar. Toque num rótulo cadastrado para refazer a foto.";
 }
 prepararIntro();
-
-$("#btnIniciar").onclick = async () => {
-  const buf = alvoMem || await lerAlvo();
-  if (buf) iniciarAR(buf); else mostrar("calib");
-};
-$("#btnRecalibrar").onclick = () => mostrar("calib");
+$("#btnIniciar").onclick = async () => { const p = await get("pacote"); if (p) iniciarAR(p); };
 $("#btnVoltar").onclick = () => { mostrar("intro"); prepararIntro(); };
-$("#btnFichaDireta").onclick = abrirFicha;
 
-/* ---------- Calibração: compila o rótulo no próprio celular ---------- */
-function carregarImagem(file){
-  return new Promise((ok, err) => {
-    const url = URL.createObjectURL(file); const img = new Image();
-    img.onload = () => ok(img); img.onerror = () => err(new Error("Não consegui abrir a foto.")); img.src = url;
-  });
+/* ---------- Calibração: compila todos os rótulos num único arquivo de reconhecimento ---------- */
+function abrirCalib(k){
+  editando = k; $("#calibTitulo").textContent = "Rótulo do " + VINHOS[k].nome;
+  $("#moldura").innerHTML = "<span>Rótulo aqui</span>"; $("#btnFoto").style.display = "block";
+  $("#barra").style.display = "none"; $("#calibStatus").textContent = ""; $("#erroCalib").style.display = "none";
+  mostrar("calib");
 }
+function imgDe(src){ return new Promise((ok, err) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => err(new Error("Não consegui abrir a foto.")); i.src = src; }); }
 function reduzir(img, max = 720){
   const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
-  const c = document.createElement("canvas");
-  c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
-  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-  return new Promise(ok => { const out = new Image(); out.onload = () => ok(out); out.src = c.toDataURL("image/jpeg", .92); });
+  const c = document.createElement("canvas"); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); return c.toDataURL("image/jpeg", .92);
+}
+async function compilarTudo(progresso){
+  const chaves = [], imgs = [];
+  for (const k of ORDEM){ const f = await get("foto-" + k); if (f){ chaves.push(k); imgs.push(await imgDe(f)); } }
+  const { Compiler } = await import("mindar-image");
+  const comp = new Compiler();
+  await comp.compileImageTargets(imgs, progresso);
+  const pacote = { chaves, buf: await comp.exportData() };
+  await put("pacote", pacote); log("pacote compilado", chaves.join(","), pacote.buf.byteLength, "bytes");
+  return pacote;
 }
 $("#inFoto").onchange = async (e) => {
   const f = e.target.files && e.target.files[0]; if (!f) return;
   const erro = $("#erroCalib"); erro.style.display = "none";
   try{
-    const img = await carregarImagem(f);
+    const img = await imgDe(URL.createObjectURL(f));
     $("#moldura").innerHTML = ""; $("#moldura").appendChild(img.cloneNode());
-    $("#btnFoto").style.display = "none"; $("#barra").style.display = "block";
-    $("#calibStatus").textContent = "Aprendendo o rótulo…";
-    const peq = await reduzir(img);
-    const { Compiler } = await import("mindar-image");
-    const comp = new Compiler();
-    await comp.compileImageTargets([peq], p => { $("#barra i").style.width = Math.min(100, p) + "%"; });
-    const buf = await comp.exportData();
-    alvoMem = buf; await salvarAlvo(buf);
-    $("#calibStatus").textContent = "Pronto!"; log("alvo compilado", buf.byteLength, "bytes");
-    setTimeout(() => iniciarAR(buf), 400);
+    $("#btnFoto").style.display = "none"; $("#barra").style.display = "block"; $("#barra i").style.width = "0";
+    $("#calibStatus").textContent = "Aprendendo os rótulos…";
+    await put("foto-" + editando, reduzir(img));
+    await compilarTudo(p => { $("#barra i").style.width = Math.min(100, p) + "%"; });
+    $("#calibStatus").textContent = "Pronto!";
+    setTimeout(() => { mostrar("intro"); prepararIntro(); }, 500);
   }catch(err){
     log("erro calibração", err);
     erro.textContent = "Não deu para aprender esse rótulo: " + (err.message || err) + ". Tente outra foto, mais de perto e sem reflexo.";
@@ -267,124 +269,121 @@ $("#inFoto").onchange = async (e) => {
   } finally { e.target.value = ""; }
 };
 
-/* ---------- Painel 3D (desenhado em canvas) ---------- */
+/* ---------- Painel 3D (um por vinho, desenhado em canvas) ---------- */
 async function fontesProntas(){
   try{ await Promise.race([Promise.all([document.fonts.load('500 120px "Cormorant Garamond"'), document.fonts.load('600 40px "Inter"'), document.fonts.load('400 40px "Inter"')]), new Promise(r => setTimeout(r, 2500))]); }catch(e){}
 }
 function rr(ctx, x, y, w, h, r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
 function quebra(ctx, txt, maxW){ const p = txt.split(" "); const linhas = []; let l = ""; for (const w of p){ const t = l ? l + " " + w : w; if (ctx.measureText(t).width > maxW && l){ linhas.push(l); l = w; } else l = t; } if (l) linhas.push(l); return linhas; }
-function desenharPainel(){
+function desenharPainel(V){
   const W = 1024, H = 1400, c = document.createElement("canvas"); c.width = W; c.height = H;
   const x = c.getContext("2d");
   const g = x.createLinearGradient(0, 0, 0, H); g.addColorStop(0, V.cor[0]); g.addColorStop(1, V.cor[1]);
   rr(x, 8, 8, W-16, H-16, 64); x.fillStyle = g; x.globalAlpha = .97; x.fill(); x.globalAlpha = 1;
   x.lineWidth = 4; x.strokeStyle = "rgba(201,164,106,.85)"; x.stroke();
-  x.fillStyle = "#c9a46a"; x.font = '600 34px Inter, sans-serif'; x.letterSpacing = "10px";
-  x.fillText(V.produtor.toUpperCase(), 80, 140);
-  x.letterSpacing = "0px"; x.fillStyle = "#f4ece0"; x.font = '500 190px "Cormorant Garamond", Georgia, serif';
-  x.fillText(V.nome, 72, 320);
+  x.fillStyle = "#c9a46a"; x.font = '600 34px Inter, sans-serif'; x.letterSpacing = "10px"; x.fillText(V.produtor.toUpperCase(), 80, 140);
+  x.letterSpacing = "0px"; x.fillStyle = "#f4ece0"; x.font = '500 190px "Cormorant Garamond", Georgia, serif'; x.fillText(V.nome, 72, 320);
   x.font = '400 40px Inter, sans-serif'; x.globalAlpha = .85; x.fillText(V.sub, 80, 395); x.globalAlpha = 1;
   x.fillStyle = "rgba(201,164,106,.6)"; x.fillRect(80, 445, W-160, 3);
   let y = 540;
-  V.painel.forEach((t, i) => {
-    x.fillStyle = "#c9a46a"; x.beginPath(); x.arc(102, y-14, 12, 0, Math.PI*2); x.fill();
-    x.fillStyle = "#f4ece0"; x.font = '500 52px Inter, sans-serif'; x.fillText(t, 140, y); y += 100;
-  });
+  V.painel.forEach(t => { x.fillStyle = "#c9a46a"; x.beginPath(); x.arc(102, y-14, 12, 0, Math.PI*2); x.fill(); x.fillStyle = "#f4ece0"; x.font = '500 52px Inter, sans-serif'; x.fillText(t, 140, y); y += 100; });
   x.fillStyle = "rgba(201,164,106,.6)"; x.fillRect(80, y-30, W-160, 3); y += 50;
   x.font = 'italic 500 50px "Cormorant Garamond", Georgia, serif'; x.fillStyle = "#f4ece0";
   quebra(x, V.notas.split(".")[0] + ".", W-160).slice(0, 3).forEach(l => { x.fillText(l, 80, y); y += 62; });
-  x.font = '600 34px Inter, sans-serif'; x.fillStyle = "#c9a46a"; x.letterSpacing = "6px";
-  x.fillText("FICHA COMPLETA OU COMPRAR ↓", 80, H-80); x.letterSpacing = "0px";
+  x.font = '600 34px Inter, sans-serif'; x.fillStyle = "#c9a46a"; x.letterSpacing = "6px"; x.fillText("FICHA COMPLETA OU COMPRAR ↓", 80, H-80); x.letterSpacing = "0px";
   return c;
 }
 
-/* ---------- AR ---------- */
+/* ---------- AR: vários rótulos, uma câmera ---------- */
 let mind = null;
-async function iniciarAR(buf){
-  mostrar("ar");
-  $("#statusTxt").textContent = "Iniciando câmera…";
-  const url = URL.createObjectURL(new Blob([buf]));
+async function iniciarAR(pacote){
+  mostrar("ar"); $("#statusTxt").textContent = "Iniciando câmera…";
+  const url = URL.createObjectURL(new Blob([pacote.buf]));
   try{
     await fontesProntas();
     mind = new MindARThree({ container: $("#arContainer"), imageTargetSrc: url, maxTrack: 1, uiLoading: "no", uiScanning: "no", uiError: "no", filterMinCF: 0.0001, filterBeta: 0.003, missTolerance: 8 });
     const { renderer, scene, camera } = mind;
-    const anchor = mind.addAnchor(0);
-
-    const tex = new THREE.CanvasTexture(desenharPainel());
-    tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
-    const L = 0.82, painel = new THREE.Mesh(new THREE.PlaneGeometry(L, L * 1400 / 1024), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
-    const brilho = new THREE.Mesh(new THREE.PlaneGeometry(L * 1.08, L * 1400 / 1024 * 1.06), new THREE.MeshBasicMaterial({ color: 0xc9a46a, transparent: true, opacity: 0 }));
-    brilho.position.z = -0.01;
-    const grupo = new THREE.Group(); grupo.add(brilho, painel); grupo.scale.setScalar(0.001);
-    anchor.group.add(grupo);
-
-    let visivel = false, t0 = 0;
-    anchor.onTargetFound = () => { visivel = true; t0 = performance.now(); $("#status").classList.add("achou"); $("#statusTxt").textContent = V.produtor + " " + V.nome + " reconhecido"; $("#mira").style.opacity = 0; $("#btnFichaAR").classList.add("on"); $("#btnComprarAR").classList.add("on"); log("targetFound"); if (navigator.vibrate) navigator.vibrate(30); };
-    anchor.onTargetLost  = () => { visivel = false; $("#status").classList.remove("achou"); $("#statusTxt").textContent = "Aponte para o rótulo do " + V.nome; $("#mira").style.opacity = 1; log("targetLost"); };
-
+    const estados = pacote.chaves.map((k, i) => {
+      const V = VINHOS[k], anchor = mind.addAnchor(i);
+      const tex = new THREE.CanvasTexture(desenharPainel(V)); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+      const Lw = 0.82, Lh = Lw * 1400 / 1024;
+      const painel = new THREE.Mesh(new THREE.PlaneGeometry(Lw, Lh), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+      const brilho = new THREE.Mesh(new THREE.PlaneGeometry(Lw * 1.08, Lh * 1.06), new THREE.MeshBasicMaterial({ color: 0xc9a46a, transparent: true, opacity: 0 }));
+      brilho.position.z = -0.01;
+      const grupo = new THREE.Group(); grupo.add(brilho, painel); grupo.scale.setScalar(0.001); anchor.group.add(grupo);
+      const st = { k, grupo, brilho, visivel: false, t0: 0 };
+      anchor.onTargetFound = () => {
+        st.visivel = true; st.t0 = performance.now(); atual = k;
+        $("#status").classList.add("achou"); $("#statusTxt").textContent = V.produtor + " " + V.nome + " reconhecido";
+        $("#mira").style.opacity = 0; $("#btnFichaAR").classList.add("on"); $("#btnComprarAR").classList.add("on");
+        $("#btnComprarAR").textContent = "Comprar " + V.nome;
+        log("targetFound", k); if (navigator.vibrate) navigator.vibrate(30);
+      };
+      anchor.onTargetLost = () => {
+        st.visivel = false; st.grupo.scale.setScalar(0.001); log("targetLost", k);
+        if (!estados.some(s => s.visivel)){ $("#status").classList.remove("achou"); $("#statusTxt").textContent = "Aponte para um rótulo"; $("#mira").style.opacity = 1; }
+      };
+      return st;
+    });
     await mind.start();
-    $("#statusTxt").textContent = "Aponte para o rótulo do " + V.nome;
-    log("AR iniciado");
+    $("#statusTxt").textContent = "Aponte para um rótulo"; log("AR iniciado", pacote.chaves.join(","));
     renderer.setAnimationLoop(() => {
-      const t = (performance.now() - t0) / 1000;
-      if (visivel){
-        const k = Math.min(1, t / 0.55), e = 1 - Math.pow(1 - k, 3);
-        grupo.scale.setScalar(0.001 + e);
-        grupo.position.z = 0.06 * e + Math.sin(t * 1.6) * 0.012;
-        brilho.material.opacity = 0.25 + Math.sin(t * 2.2) * 0.12;
+      for (const s of estados){
+        if (!s.visivel) continue;
+        const t = (performance.now() - s.t0) / 1000, k = Math.min(1, t / 0.55), e = 1 - Math.pow(1 - k, 3);
+        s.grupo.scale.setScalar(0.001 + e); s.grupo.position.z = 0.06 * e + Math.sin(t * 1.6) * 0.012;
+        s.brilho.material.opacity = 0.25 + Math.sin(t * 2.2) * 0.12;
       }
       renderer.render(scene, camera);
     });
   }catch(err){
-    log("erro AR", err);
-    pararAR(); mostrar("intro"); prepararIntro();
+    log("erro AR", err); pararAR(); mostrar("intro"); prepararIntro();
     const el = $("#erroIntro"); el.style.display = "block";
-    el.textContent = "Não consegui abrir a câmera (" + (err.message || err) + "). Confira se o navegador tem permissão de câmera e se a página abriu no Safari ou Chrome, não dentro de outro app.";
+    el.textContent = "Não consegui abrir a câmera (" + (err.message || err) + "). Confira a permissão de câmera e abra a página no Safari ou Chrome, não dentro de outro app.";
   }
 }
-function pararAR(){ try{ if (mind){ mind.renderer.setAnimationLoop(null); mind.stop(); } }catch(e){} mind = null; $("#arContainer").innerHTML = ""; $("#btnFichaAR").classList.remove("on"); $("#btnComprarAR").classList.remove("on"); $("#mira").style.opacity = 1; }
+function pararAR(){ try{ if (mind){ mind.renderer.setAnimationLoop(null); mind.stop(); } }catch(e){} mind = null; $("#arContainer").innerHTML = ""; $("#btnFichaAR").classList.remove("on"); $("#btnComprarAR").classList.remove("on"); $("#mira").style.opacity = 1; $("#status").classList.remove("achou"); }
 $("#btnFechar").onclick = () => { pararAR(); mostrar("intro"); prepararIntro(); };
-$("#btnFichaAR").onclick = abrirFicha;
-$("#btnComprarAR").onclick = comprar;
-$("#btnComprarIntro").onclick = comprar;
+$("#btnFichaAR").onclick = () => abrirFicha(atual);
+$("#btnComprarAR").onclick = () => comprar(atual);
 
 /* ---------- Compra ---------- */
-function linkCompra(){
-  const base = params.get("checkout") || CHECKOUT[chave] || "";
-  if (!base) return "";
+const params = new URLSearchParams(location.search);
+function linkCompra(k){
+  const base = CHECKOUT[k] || ""; if (!base) return "";
   try{
     const u = new URL(base);
-    const utm = { utm_source: "gondola", utm_medium: "qr_ar", utm_campaign: "piloto_ficha_ar", utm_content: chave };
-    for (const [k, v] of Object.entries(utm)) if (!u.searchParams.has(k)) u.searchParams.set(k, v);
+    const utm = { utm_source: "gondola", utm_medium: "qr_ar", utm_campaign: params.get("secao") || "piloto_ficha_ar", utm_content: k };
+    for (const [a, b] of Object.entries(utm)) if (!u.searchParams.has(a)) u.searchParams.set(a, b);
     return u.toString();
   }catch(e){ return base; }
 }
-function comprar(){
-  const url = linkCompra();
-  log("clique comprar", chave, url || "(sem link)");
+function comprar(k){
+  if (!k) return; const url = linkCompra(k);
+  log("clique comprar", k, url || "(sem link)");
   if (url){ location.href = url; return; }
-  abrirFicha(); const av = $("#avisoCompra"); if (av) av.style.display = "block";
+  abrirFicha(k); const av = $("#avisoCompra"); if (av) av.style.display = "block";
 }
 
 /* ---------- Ficha completa ---------- */
-function abrirFicha(){
+function abrirFicha(k){
+  if (!k) return; const V = VINHOS[k];
   $("#folha").innerHTML = `
     <div class="selo">${V.produtor}</div>
     <h3>${V.nome}</h3>
     <p class="sub">${V.sub}</p>
-    <div class="grade">${V.grade.map(([k,v]) => `<div><small>${k}</small><span>${v}</span></div>`).join("")}</div>
+    <div class="grade">${V.grade.map(([a,b]) => `<div><small>${a}</small><span>${b}</span></div>`).join("")}</div>
     <div class="bloco"><small>Notas de degustação</small><p>${V.notas}</p></div>
     <div class="bloco"><small>Harmonização</small><p>${V.harmoniza}</p></div>
     <div class="bloco"><p class="curio">${V.curio}</p></div>
-    <button class="btn comprar" id="btnComprarFicha">Comprar agora</button>
+    <button class="btn comprar" id="btnComprarFicha">Comprar ${V.nome}</button>
     <div class="aviso" id="avisoCompra">Piloto: o link de checkout deste vinho ainda não foi configurado. Na versão final, este botão leva direto para a página de compra.</div>
     <button class="btn prim voltar" id="btnFecharFicha">Voltar</button>`;
   $("#ficha").classList.add("on");
   $("#btnFecharFicha").onclick = () => $("#ficha").classList.remove("on");
-  $("#btnComprarFicha").onclick = comprar;
+  $("#btnComprarFicha").onclick = () => comprar(k);
 }
 $("#ficha").addEventListener("click", e => { if (e.target.id === "ficha") $("#ficha").classList.remove("on"); });
-window.__AR = { V, chave };
 </script>
 </body>
 </html>
