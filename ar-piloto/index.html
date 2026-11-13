@@ -105,6 +105,9 @@
   .item .chip{margin-left:auto;font-size:11.5px;font-weight:600;border-radius:999px;padding:8px 12px;border:1px solid rgba(201,164,106,.6);color:var(--ouro);background:none;cursor:pointer;white-space:nowrap}
   .item .chip.ok{background:rgba(127,209,139,.14);border-color:rgba(127,209,139,.5);color:#a8e3b1}
   .btn:disabled{opacity:.4}
+  .item .acoes-item{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+  .item .limpar{background:none;border:0;color:var(--creme);opacity:.55;font:500 11px var(--sans);text-decoration:underline;cursor:pointer}
+  .item .fotos{font-size:11.5px;color:#a8e3b1;margin-top:5px}
 </style>
 </head>
 <body>
@@ -127,7 +130,7 @@
 <!-- 2. Calibração (só no piloto: em loja os rótulos já vêm cadastrados) -->
 <section id="calib" class="tela">
   <h2 id="calibTitulo">Ensine o rótulo</h2>
-  <p>Fotografe o rótulo de frente, com boa luz e sem reflexo, preenchendo a moldura.</p>
+  <p id="calibDica">Fotografe o rótulo de frente, com boa luz e sem reflexo, preenchendo a moldura.</p>
   <div class="moldura" id="moldura"><span>Rótulo aqui</span></div>
   <div class="barra" id="barra"><i></i></div>
   <div id="calibStatus"></div>
@@ -211,17 +214,39 @@ async function put(k, v){ MEM[k] = v; try{ const d = await db(); await new Promi
 async function get(k){ if (k in MEM) return MEM[k]; try{ const d = await db(); return await new Promise((ok,err)=>{ const r=d.transaction("kv").objectStore("kv").get(k); r.onsuccess=()=>ok(r.result ?? null); r.onerror=()=>err(r.error); }); }catch(e){ return null; } }
 
 /* ---------- Intro: lista de rótulos ---------- */
+const MAX_FOTOS = 3;
+const DICAS = [
+  "Foto 1: rótulo de frente, com boa luz e sem reflexo, preenchendo a moldura.",
+  "Foto 2: gire a garrafa um pouco para a esquerda, ou fotografe com outra luz.",
+  "Foto 3: gire a garrafa um pouco para a direita, ou fotografe um pouco mais de longe."
+];
+async function fotosDe(k){
+  let f = await get("fotos-" + k);
+  if (!f){ const antiga = await get("foto-" + k); f = antiga ? [antiga] : []; }
+  return f;
+}
 async function prepararIntro(){
-  const fotos = await Promise.all(ORDEM.map(k => get("foto-" + k)));
-  const n = fotos.filter(Boolean).length;
-  $("#lista").innerHTML = ORDEM.map((k, i) => `
-    <div class="item"><div><div class="nome">${VINHOS[k].nome}</div><div class="uva">${VINHOS[k].sub}</div></div>
-    <button class="chip ${fotos[i] ? "ok" : ""}" data-k="${k}">${fotos[i] ? "✓ Cadastrado" : "Fotografar rótulo"}</button></div>`).join("");
-  document.querySelectorAll(".chip").forEach(b => b.onclick = () => abrirCalib(b.dataset.k));
+  const todas = await Promise.all(ORDEM.map(fotosDe));
+  const n = todas.filter(f => f.length).length;
+  $("#lista").innerHTML = ORDEM.map((k, i) => {
+    const q = todas[i].length;
+    const botao = q === 0 ? `<button class="chip" data-k="${k}">Fotografar rótulo</button>`
+      : q < MAX_FOTOS ? `<button class="chip ok" data-k="${k}">＋ Adicionar foto</button>` : `<span class="chip ok" style="cursor:default">✓ Completo</span>`;
+    const extra = q ? `<button class="limpar" data-limpar="${k}">Refazer fotos</button>` : "";
+    return `<div class="item"><div><div class="nome">${VINHOS[k].nome}</div><div class="uva">${VINHOS[k].sub}</div>${q ? `<div class="fotos">${q} de ${MAX_FOTOS} fotos cadastradas</div>` : ""}</div>
+      <div class="acoes-item">${botao}${extra}</div></div>`;
+  }).join("");
+  document.querySelectorAll(".chip[data-k]").forEach(b => b.onclick = () => abrirCalib(b.dataset.k));
+  document.querySelectorAll("[data-limpar]").forEach(b => b.onclick = async () => {
+    const k = b.dataset.limpar; await put("fotos-" + k, []); await put("foto-" + k, null);
+    const restam = (await Promise.all(ORDEM.map(fotosDe))).some(f => f.length);
+    if (restam){ $("#dica").textContent = "Atualizando o reconhecimento…"; await compilarTudo(() => {}); } else await put("pacote", null);
+    prepararIntro();
+  });
   $("#btnIniciar").disabled = n === 0;
-  $("#dica").textContent = n === 0 ? "Piloto: fotografe cada rótulo uma vez para o sistema aprender. Na loja, os rótulos já vêm cadastrados."
+  $("#dica").textContent = n === 0 ? "Piloto: fotografe cada rótulo para o sistema aprender. Na loja, os rótulos já vêm cadastrados."
     : n < ORDEM.length ? `${n} de ${ORDEM.length} rótulos cadastrados. Já dá para testar, ou cadastre o outro para ver a troca entre garrafas.`
-    : "Tudo pronto. Na câmera, troque de garrafa e veja a ficha mudar. Toque num rótulo cadastrado para refazer a foto.";
+    : "Tudo pronto. Mais fotos por rótulo (ângulos e luzes diferentes) deixam o reconhecimento mais firme.";
 }
 prepararIntro();
 $("#btnIniciar").onclick = async () => { const p = await get("pacote"); if (p) iniciarAR(p); };
@@ -229,7 +254,8 @@ $("#btnVoltar").onclick = () => { mostrar("intro"); prepararIntro(); };
 
 /* ---------- Calibração: compila todos os rótulos num único arquivo de reconhecimento ---------- */
 function abrirCalib(k){
-  editando = k; $("#calibTitulo").textContent = "Rótulo do " + VINHOS[k].nome;
+  editando = k;
+  fotosDe(k).then(f => { $("#calibTitulo").textContent = "Rótulo do " + VINHOS[k].nome + (f.length ? ` · foto ${f.length + 1}` : ""); $("#calibDica").textContent = DICAS[Math.min(f.length, DICAS.length - 1)]; });
   $("#moldura").innerHTML = "<span>Rótulo aqui</span>"; $("#btnFoto").style.display = "block";
   $("#barra").style.display = "none"; $("#calibStatus").textContent = ""; $("#erroCalib").style.display = "none";
   mostrar("calib");
@@ -242,7 +268,7 @@ function reduzir(img, max = 720){
 }
 async function compilarTudo(progresso){
   const chaves = [], imgs = [];
-  for (const k of ORDEM){ const f = await get("foto-" + k); if (f){ chaves.push(k); imgs.push(await imgDe(f)); } }
+  for (const k of ORDEM){ for (const f of await fotosDe(k)){ chaves.push(k); imgs.push(await imgDe(f)); } }
   const { Compiler } = await import("mindar-image");
   const comp = new Compiler();
   await comp.compileImageTargets(imgs, progresso);
@@ -258,7 +284,7 @@ $("#inFoto").onchange = async (e) => {
     $("#moldura").innerHTML = ""; $("#moldura").appendChild(img.cloneNode());
     $("#btnFoto").style.display = "none"; $("#barra").style.display = "block"; $("#barra i").style.width = "0";
     $("#calibStatus").textContent = "Aprendendo os rótulos…";
-    await put("foto-" + editando, reduzir(img));
+    const lista = await fotosDe(editando); lista.push(reduzir(img)); await put("fotos-" + editando, lista.slice(-MAX_FOTOS));
     await compilarTudo(p => { $("#barra i").style.width = Math.min(100, p) + "%"; });
     $("#calibStatus").textContent = "Pronto!";
     setTimeout(() => { mostrar("intro"); prepararIntro(); }, 500);
